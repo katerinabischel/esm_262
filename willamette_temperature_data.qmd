@@ -1,0 +1,92 @@
+---
+title: "Willamette River Stream Temperature"
+author: "Your Names Here"
+date: today
+format: html
+---
+
+## Overview
+
+This document downloads (or loads) daily water temperature data from three USGS gauge
+stations on the Willamette River in Oregon (2010–2023) and provides summary statistics
+and a time-series visualization.
+
+```{r}
+#| label: setup
+#| message: false
+#| warning: false
+
+library(dataRetrieval)
+library(tidyverse)
+```
+
+## Load or Download Data
+
+Set `use_local <- TRUE` to load the saved CSV instead of hitting the NWIS server.
+
+```{r}
+#| label: load-data
+#| message: false
+#| warning: false
+
+use_local <- TRUE   # change to FALSE to re-download from NWIS
+
+if (use_local && file.exists("data/willamette_temp.csv")) {
+  temp_data <- read_csv("data/willamette_temp.csv", show_col_types = FALSE)
+  temp_data$month <- factor(temp_data$month,
+                            levels = c("Jan","Feb","Mar","Apr","May","Jun",
+                                       "Jul","Aug","Sep","Oct","Nov","Dec"),
+                            ordered = TRUE)
+} else {
+  siteNumbers <- c("14211720", "14211010", "14166000")
+  parameterCd <- "00010"   # water temperature
+  startDate   <- "2010-01-01"
+  endDate     <- "2023-12-31"
+
+  temp_data <- readNWISdv(siteNumbers, parameterCd, startDate, endDate)
+
+  colnames(temp_data) <- c("agency_cd", "site_no", "Date", "temp_C")
+
+  temp_data$month <- month(temp_data$Date, label = TRUE)
+  temp_data$year  <- year(temp_data$Date)
+
+  dir.create("data", showWarnings = FALSE)
+  write_csv(temp_data, "data/willamette_temp.csv")
+  message("Data downloaded and saved to data/willamette_temp.csv")
+}
+```
+
+## Time-Series Plot
+
+```{r}
+#| label: plot-timeseries
+#| fig-width: 9
+#| fig-height: 4
+
+ggplot(temp_data, aes(x = Date, y = temp_C, color = site_no)) +
+  geom_line(alpha = 0.7) +
+  labs(
+    title = "Daily Stream Temperature at Willamette River Sites (2010–2023)",
+    x = "Date",
+    y = "Temperature (°C)",
+    color = "Site"
+  ) +
+  theme_minimal()
+```
+
+## Summary Statistics by Site
+
+```{r}
+#| label: summary-stats
+
+temp_data |>
+  group_by(site_no) |>
+  summarise(
+    n         = n(),
+    mean_C    = round(mean(temp_C, na.rm = TRUE), 2),
+    min_C     = round(min(temp_C,  na.rm = TRUE), 2),
+    max_C     = round(max(temp_C,  na.rm = TRUE), 2),
+    sd_C      = round(sd(temp_C,   na.rm = TRUE), 2)
+  ) |>
+  knitr::kable(caption = "Summary statistics for each USGS site")
+```
