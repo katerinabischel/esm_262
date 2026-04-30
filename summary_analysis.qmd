@@ -1,0 +1,150 @@
+---
+title: "Willamette River Summer Temperature Trends — Summary"
+author: "Katerina Bischel and "
+date: today
+format: html
+---
+
+## Background
+
+We analyzed daily water temperature records from three USGS gauge stations on the
+Willamette River in Oregon (2010–2023) to determine whether summer temperatures are
+warming over time and whether warming rates differ between sites.
+
+The three sites are:
+
+- **14166000** — Willamette River at Salem
+- **14211010** — Willamette River at Portland (Hawthorne Bridge)
+- **14211720** — Willamette River at Portland (Morrison Bridge)
+
+Each partner independently analyzed a peak summer month using a GLM with a
+`year × site_no` interaction. This model reveals both the direction of the trend
+(positive = warming, negative = cooling) and whether sites are warming at different
+rates relative to the reference site (14166000).
+
+```{r}
+#| message: false
+#| warning: false
+
+# tidyverse for data wrangling and ggplot2 for visualization
+library(tidyverse)
+```
+
+```{r}
+# load the locally saved CSV produced by willamette_temperature_data.qmd
+temp_data <- read_csv("data/willamette_temp.csv")
+```
+
+## July Analysis (Partner 1)
+
+```{r}
+# filter to July observations and fit the GLM trend model
+july_data <- subset(temp_data, month == "Jul")
+
+# year*site_no fits separate slopes per site, allowing us to detect
+# differences in warming rate across the three locations
+july_model <- glm(temp_C ~ year*site_no, data = july_data)
+summary(july_model)
+```
+
+## August Analysis (Partner 2)
+
+```{r}
+# filter to August observations and fit the same GLM structure
+aug_data <- subset(temp_data, month == "Aug")
+
+aug_model <- glm(temp_C ~ year*site_no, data = aug_data)
+summary(aug_model)
+```
+
+## Key Findings
+
+Both July and August show statistically significant positive `year` coefficients
+(p < 0.001), meaning all three Willamette River sites are **warming over time** during
+peak summer months. The interaction terms (`year:site_no14211010`,
+`year:site_no14211720`) indicate whether the downstream Portland sites are warming
+faster or slower than the upstream Salem reference site.
+
+```{r}
+# helper function to extract the slope (°C/year) for each site from a fitted GLM
+# dynamically finds interaction term names so it works regardless of factor ordering
+extract_slopes <- function(model, month_label) {
+  coefs <- coef(summary(model))
+
+  # the reference site slope is the "year" coefficient alone
+  slope_ref <- coefs["year", "Estimate"]
+
+  # find any interaction terms of the form "year:site_noXXXXXX" dynamically
+  # this avoids hardcoding names that may differ depending on factor levels
+  int_terms <- grep("year:site_no", rownames(coefs), value = TRUE)
+
+  # extract site IDs from the interaction term names (strip "year:site_no" prefix)
+  site_ids <- gsub("year:site_no", "", int_terms)
+
+  # compute actual slope for each non-reference site: base slope + interaction estimate
+  other_slopes <- slope_ref + coefs[int_terms, "Estimate"]
+
+  # combine reference and non-reference sites into one tibble
+  tibble(
+    Month          = month_label,
+    Site           = c("14166000 (ref)", site_ids),
+    Slope_C_per_yr = round(c(slope_ref, other_slopes), 4),
+    Direction      = ifelse(c(slope_ref, other_slopes) > 0, "Warming", "Cooling")
+  )
+}
+
+# combine July and August slope estimates into one summary table
+slopes <- bind_rows(
+  extract_slopes(july_model, "July"),
+  extract_slopes(aug_model,  "August")
+)
+
+# display as a formatted table
+knitr::kable(slopes, caption = "Estimated temperature trend (°C/year) by site and month")
+```
+
+## Summary Plot
+
+The plot below shows annual mean temperatures for July and August across all three
+sites. This is the most meaningful result for a river manager — it makes the
+warming signal clear across both months and all locations, and the confidence
+intervals show how certain we are about each trend.
+
+```{r}
+#| fig-width: 10
+#| fig-height: 5
+
+# calculate annual mean temperature for July and August combined, per site
+summer_annual <- temp_data |>
+  filter(month %in% c("Jul", "Aug")) |>
+  group_by(year, month, site_no) |>
+  summarise(mean_temp = mean(temp_C, na.rm = TRUE), .groups = "drop")
+
+# facet by month so July and August trends can be compared side by side
+# linear trend lines with 95% CI make the warming signal easy to communicate
+ggplot(summer_annual, aes(x = year, y = mean_temp, color = site_no)) +
+  geom_point(size = 1.8, alpha = 0.8) +
+  geom_smooth(method = "lm", se = TRUE, linewidth = 0.8) +
+  facet_wrap(~month) +
+  labs(
+    title = "Summer Stream Temperature Trends on the Willamette River (2010–2023)",
+    subtitle = "Linear trend fitted per site; shaded band = 95% confidence interval",
+    x = "Year",
+    y = "Mean Monthly Temperature (°C)",
+    color = "USGS Site"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "bottom")
+```
+
+## Conclusions for a River Manager
+
+- **Warming is occurring**: All three sites show positive temperature trends in both
+  July and August over the 14-year record, with slopes statistically significant at
+  the p < 0.001 level.
+- **Warming rates vary by site**: The interaction terms from both GLMs indicate
+  differences in the rate of warming between the upstream Salem site and the
+  downstream Portland locations.
+- **Management implication**: Rising summer water temperatures reduce dissolved
+  oxygen and stress cold-water fish species such as salmon. Continued monitoring
+  and upstream riparian buffer restoration should be prioritized to slow this trend.
