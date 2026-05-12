@@ -1,0 +1,226 @@
+---
+title: "HW3. Air Quality Risk Assessment"
+author: "Katerina Bischel"
+date: "2026-05-12"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: false
+    embed-resources: true
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+## Setup
+
+```{r setup}
+library(tidyverse)
+
+# Reproducible sampling
+set.seed(262)
+```
+
+## Part 1. Build the Dataset
+
+I simulate one calendar year of daily PM2.5 readings from a single monitoring
+station. PM2.5 is drawn from a normal distribution and truncated at zero
+(concentrations cannot be negative).
+
+**Distribution justification.** Typical urban daily PM2.5 in U.S. cities sits
+roughly in the 5–25 µg/m³ range on normal days, with episodic spikes well
+above that during inversions, wildfire smoke events, and heavy traffic
+periods. The current U.S. EPA 24-hour NAAQS is 35 µg/m³, the revised (2024)
+annual NAAQS is 9 µg/m³, and the WHO 24-hour guideline is 15 µg/m³. I chose
+`rnorm(n = 365, mean = 15, sd = 12)` truncated at zero, which centers daily
+concentrations modestly above the EPA annual standard — defensible for a
+moderately polluted urban monitoring site — and uses a standard deviation
+large enough to produce a believable right tail of "unhealthy" days
+(roughly 10–20 per year) interspersed in a year that is dominated by
+"good" and "moderate" days. A pure normal under-represents the very long
+tail of real-world wildfire or stagnation events, but it is the closest fit
+among the in-class choices (`runif`, `rnorm`, `rpois`) and produces
+qualitatively realistic counts across the three EPA risk categories.
+
+```{r build-dataset}
+n_days <- 365
+
+# Generate PM2.5 and truncate at zero (negative concentrations are non-physical)
+pm25_raw <- rnorm(n_days, mean = 15, sd = 12)
+pm25     <- pmax(pm25_raw, 0)
+
+# Assign seasons by day-of-year range
+season_levels <- c("winter", "spring", "summer", "fall")
+day <- 1:n_days
+season_chr <- dplyr::case_when(
+  day <= 90               ~ "winter",
+  day >= 91  & day <= 180 ~ "spring",
+  day >= 181 & day <= 270 ~ "summer",
+  day >= 271              ~ "fall"
+)
+
+aq <- data.frame(
+  day    = day,
+  pm25   = pm25,
+  season = factor(season_chr, levels = season_levels),
+  risk   = NA_character_,
+  stringsAsFactors = FALSE
+)
+
+str(aq)
+head(aq)
+summary(aq$pm25)
+```
+
+## Part 2. Classify Risk with a For Loop
+
+The same `for` loop does two things:
+
+1.  Fills `risk` based on EPA-style PM2.5 thresholds (good < 12, moderate 12–35.4, unhealthy > 35.4).
+2.  Tracks the longest consecutive run of `"unhealthy"` days by comparing each row to the previous row's classification.
+
+```{r classify-risk-loop}
+# Initialize trackers for the streak
+current_streak       <- 0
+max_unhealthy_streak <- 0
+
+for (i in seq_len(nrow(aq))) {
+
+  # --- 1. Classify risk for day i -------------------------------------------
+  if (aq$pm25[i] < 12) {
+    aq$risk[i] <- "good"
+  } else if (aq$pm25[i] <= 35.4) {
+    aq$risk[i] <- "moderate"
+  } else {
+    aq$risk[i] <- "unhealthy"
+  }
+
+  # --- 2. Track consecutive "unhealthy" streak ------------------------------
+  # Check the previous row's risk to decide whether to extend or restart.
+  if (aq$risk[i] == "unhealthy") {
+    if (i == 1 || aq$risk[i - 1] != "unhealthy") {
+      current_streak <- 1            # new streak begins
+    } else {
+      current_streak <- current_streak + 1   # extend existing streak
+    }
+    if (current_streak > max_unhealthy_streak) {
+      max_unhealthy_streak <- current_streak
+    }
+  } else {
+    current_streak <- 0              # streak broken
+  }
+}
+
+# Make risk an ordered factor for nicer plotting/tables
+aq$risk <- factor(aq$risk, levels = c("good", "moderate", "unhealthy"))
+
+table(aq$risk)
+sprintf("Longest consecutive unhealthy streak: %d days", max_unhealthy_streak)
+```
+
+## Part 3. Seasonal Summary with a For Loop
+
+Count the number of `"unhealthy"` days in each season using a `for` loop.
+Results are stored in a named integer vector and then converted to a tidy
+data frame for display.
+
+```{r seasonal-summary-loop}
+unhealthy_by_season <- setNames(integer(length(season_levels)), season_levels)
+
+for (s in season_levels) {
+  unhealthy_by_season[s] <- sum(aq$season == s & aq$risk == "unhealthy")
+}
+
+unhealthy_by_season
+
+# Tidy version for the report
+seasonal_summary <- data.frame(
+  season         = factor(season_levels, levels = season_levels),
+  unhealthy_days = as.integer(unhealthy_by_season)
+)
+seasonal_summary
+```
+
+## Part 4. Visualize and Report
+
+Both plot titles are built with `sprintf()` and include the
+`max_unhealthy_streak` value computed in Part 2.
+
+```{r plot-pm25-time-series, fig.width=8, fig.height=4.5}
+title_ts <- sprintf(
+  "Daily PM2.5 across the year. Longest unhealthy streak: %d days",
+  max_unhealthy_streak
+)
+
+ggplot(aq, aes(x = day, y = pm25, color = season)) +
+  geom_line(alpha = 0.5) +
+  geom_point(size = 0.9) +
+  geom_hline(yintercept = 12,   linetype = "dashed", color = "grey40") +
+  geom_hline(yintercept = 35.4, linetype = "dashed", color = "grey40") +
+  annotate("text", x = 5, y = 13,   label = "moderate threshold (12)",
+           hjust = 0, size = 3, color = "grey30") +
+  annotate("text", x = 5, y = 36.4, label = "unhealthy threshold (35.4)",
+           hjust = 0, size = 3, color = "grey30") +
+  labs(title = title_ts,
+       x = "Day of year",
+       y = expression("PM2.5 ("*mu*"g/m"^3*")"),
+       color = "Season") +
+  theme_minimal()
+```
+
+```{r plot-risk-bar, fig.width=6, fig.height=4}
+title_bar <- sprintf(
+  "Days by risk category. Longest unhealthy streak: %d days",
+  max_unhealthy_streak
+)
+
+ggplot(aq, aes(x = risk, fill = risk)) +
+  geom_bar() +
+  geom_text(stat = "count", aes(label = after_stat(count)), vjust = -0.4) +
+  scale_fill_manual(values = c(good      = "#2c7bb6",
+                               moderate  = "#fdae61",
+                               unhealthy = "#d7191c")) +
+  labs(title = title_bar,
+       x = "Risk category",
+       y = "Number of days") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+### Management summary
+
+```{r summary-stats, echo=FALSE}
+n_good      <- sum(aq$risk == "good")
+n_moderate  <- sum(aq$risk == "moderate")
+n_unhealthy <- sum(aq$risk == "unhealthy")
+worst_season <- names(unhealthy_by_season)[which.max(unhealthy_by_season)]
+worst_season_count <- max(unhealthy_by_season)
+```
+
+Over the simulated year, this monitoring station recorded `r n_good` days
+classified as "good" (PM2.5 < 12 µg/m³), `r n_moderate` "moderate" days
+(12–35.4 µg/m³), and `r n_unhealthy` "unhealthy" days exceeding the EPA
+24-hour standard of 35.4 µg/m³. The longest consecutive run of unhealthy
+days was `r max_unhealthy_streak`. Unhealthy days were not evenly
+distributed across the calendar — **`r worst_season`** carried the largest
+share with `r worst_season_count` unhealthy days, a pattern consistent with
+seasonal drivers such as temperature inversions, residential wood smoke,
+agricultural burning, or wildfire smoke (depending on the season).
+Although most days fell within acceptable ranges, the unhealthy episodes
+matter disproportionately for public health: even a short multi-day streak
+substantially raises cumulative exposure for sensitive populations
+(children, older adults, and people with asthma or cardiovascular disease).
+From a policy standpoint, the data argue for (1) season-targeted advisories
+and burn-day restrictions during the highest-risk months, (2) clear
+public-facing alerts triggered whenever a multi-day unhealthy streak is
+forecast, and (3) sustained monitoring so trends in streak length and
+seasonal share can be tracked year over year and compared against
+intervention efforts.
+
+## Reproducibility
+
+```{r session-info}
+sessionInfo()
+```
