@@ -1,0 +1,122 @@
+---
+title: "Assignment #4. Simpson's Biodiversity Index"
+author: "Katerina Bischel"
+date: "2026-05-13"
+format:
+  html:
+    toc: true
+    code-fold: false
+editor: visual
+---
+
+## Overview
+
+This assignment implements a function that computes **Simpson's Biodiversity Index (D)** in R. Simpson's Index measures the probability that two individuals randomly selected from a sample will belong to the same species. Values range from 0 to 1, with **lower values associated with lower diversity** (the *D* form used here; some texts instead report `1 - D` as the diversity form).
+
+Reference: [Simpson Biodiversity](https://en.wikipedia.org/wiki/Diversity_index#Simpson_index)
+
+## Function Contract
+
+### Inputs
+
+-   `species` — a vector with one entry per individual observed. Each entry is the species that individual belongs to. The vector can be of type `character`, `numeric`, or `factor`. Example: `c("oak", "oak", "pine", "maple", "oak", "pine")`.
+-   `method` — a character string selecting which formula to apply:
+    -   `"discrete"` (default): $D = \dfrac{\sum n_i (n_i - 1)}{N (N - 1)}$ — the unbiased estimator for a finite sample.
+    -   `"proportional"`: $D = \sum \left( \dfrac{n_i}{N} \right)^2$ — the proportional form.
+
+In both formulas $n_i$ is the number of individuals of species *i* and $N$ is the total number of individuals across all species.
+
+### Output
+
+A single numeric value between 0 and 1 — Simpson's Index (*D*) for the input sample.
+
+### What the function does
+
+1.  Validates the inputs (no missing values, supported method, at least 2 individuals).
+2.  Uses `as.factor()` and `table()` to count the number of individuals per species (the "use factors" hint from the assignment).
+3.  Computes *D* using the selected formula and returns it.
+
+## Source the Function
+
+```{r}
+source("simpson.R")
+```
+
+## Tests
+
+### Test 1. A perfectly even community
+
+Equal counts of three species should give the *minimum* possible *D* for three species.
+
+```{r}
+even = c("A", "A", "B", "B", "C", "C")
+simpson_index(even, method = "discrete")
+simpson_index(even, method = "proportional")
+```
+
+For the proportional form we expect `3 * (2/6)^2 = 1/3 ≈ 0.3333`.
+
+### Test 2. A dominated community (low diversity)
+
+One species dominates the sample, so *D* should be close to 1.
+
+```{r}
+dominated = c(rep("oak", 95), rep("pine", 3), rep("maple", 2))
+simpson_index(dominated, method = "discrete")
+simpson_index(dominated, method = "proportional")
+```
+
+### Test 3. Hand-checked small example
+
+For `c("oak","oak","pine","maple","oak","pine")` we have $n_{oak}=3$, $n_{pine}=2$, $n_{maple}=1$, $N=6$.
+
+-   Discrete: $\dfrac{3 \cdot 2 + 2 \cdot 1 + 1 \cdot 0}{6 \cdot 5} = \dfrac{8}{30} \approx 0.2667$
+-   Proportional: $(3/6)^2 + (2/6)^2 + (1/6)^2 = 14/36 \approx 0.3889$
+
+```{r}
+sample_small = c("oak", "oak", "pine", "maple", "oak", "pine")
+simpson_index(sample_small, method = "discrete")
+simpson_index(sample_small, method = "proportional")
+```
+
+### Test 4. Randomly generated data
+
+Generate a random community of 200 individuals drawn from 5 species with uneven probabilities and compute *D*.
+
+```{r}
+set.seed(262)
+random_community = sample(
+  x       = c("sp1", "sp2", "sp3", "sp4", "sp5"),
+  size    = 200,
+  replace = TRUE,
+  prob    = c(0.5, 0.2, 0.15, 0.10, 0.05)
+)
+table(random_community)
+simpson_index(random_community, method = "discrete")
+simpson_index(random_community, method = "proportional")
+```
+
+### Test 5. Works with numeric and factor inputs
+
+```{r}
+numeric_species = c(1, 1, 2, 3, 3, 3, 2, 1)
+simpson_index(numeric_species)
+
+factor_species = factor(c("a", "b", "b", "c", "c", "c"))
+simpson_index(factor_species)
+```
+
+### Test 6. Error handling
+
+These calls should each error out with an informative message.
+
+```{r}
+#| error: true
+simpson_index(c("only_one"))                       # too few individuals
+simpson_index(c("a", NA, "b"))                     # NA values
+simpson_index(c("a", "b", "c"), method = "bogus")  # bad method
+```
+
+## Summary
+
+The `simpson_index()` function provides both the discrete (sample-corrected) and proportional forms of Simpson's Index, validates its inputs, and uses factors internally to count individuals per species. The tests above cover even, dominated, hand-checked, randomly generated, alternative-typed, and invalid inputs.
